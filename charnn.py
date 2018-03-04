@@ -1,17 +1,22 @@
+import sys
+
 import os
 import torch
-from fastai.io import *
-from fastai.conv_learner import *
-
-from fastai.column_data import *
+from torch import utils
+import torch.utils.data as utils
+from torch import nn
+from torch.autograd import Variable
+import torch.optim as optim
+import torch.nn.functional as F
+import numpy as np
 
 ## prepare to data
 
 # place to save dataset
 PATH='data/nietzsche/'
 
-# this function below doesn't work as expected. 
-# do it manually instead. 
+# this function below doesn't work as expected.
+# do it manually instead.
 #get_data("https://s3.amazonaws.com/text-datasets/nietzsche.txt", PATH + 'nietzsche.txt')
 text = open(PATH + 'nietzsche.txt').read()
 
@@ -33,9 +38,14 @@ c2_dat = [idx[i+1] for i in range(0, len(idx)-cs, cs)]
 c3_dat = [idx[i+2] for i in range(0, len(idx)-cs, cs)]
 c4_dat = [idx[i+3] for i in range(0, len(idx)-cs, cs)]
 
-x1 = np.stack(c1_dat)
-x2 = np.stack(c2_dat)
-x3 = np.stack(c3_dat)
+
+tensor_x = torch.LongTensor((c1_dat, c2_dat, c3_dat))
+tensor_x = torch.t(tensor_x)
+t_y = torch.LongTensor(c4_dat)
+tensor_y = t_y #torch.t(t_y)
+
+my_dataset = utils.TensorDataset(tensor_x,tensor_y) # create your datset
+trainloader = utils.DataLoader(my_dataset) # create your dataloader
 
 y = np.stack(c4_dat)
 
@@ -53,33 +63,65 @@ class Char3Model(nn.Module):
 
         # The 'orange arrow' from our diagram - the layer operation from hidden to hidden
         self.l_hidden = nn.Linear(n_hidden, n_hidden)
-        
+
         # The 'blue arrow' from our diagram - the layer operation from hidden to output
         self.l_out = nn.Linear(n_hidden, vocab_size)
-        
+
     def forward(self, c1, c2, c3):
         in1 = F.relu(self.l_in(self.e(c1)))
         in2 = F.relu(self.l_in(self.e(c2)))
         in3 = F.relu(self.l_in(self.e(c3)))
-        
-        h = V(torch.zeros(in1.size()).cuda())
+
+        h = Variable(torch.zeros(in1.size()).cuda())
         h = F.tanh(self.l_hidden(h+in1))
         h = F.tanh(self.l_hidden(h+in2))
         h = F.tanh(self.l_hidden(h+in3))
-        
+
         return F.log_softmax(self.l_out(h))
 
 
-md = ColumnarModelData.from_arrays('.', [-1], np.stack([x1,x2,x3], axis=1), y, bs=512)
-
 m = Char3Model(vocab_size, n_fac).cuda()
-
-it = iter(md.trn_dl)
-*xs,yt = next(it)
-t = m(*V(xs))
 
 opt = optim.Adam(m.parameters(), 1e-2)
 
-fit(m, md, 1, opt, F.nll_loss)
+#set number of epochs
+nb_epochs = 2
 
+#criterion = F.nll_loss()
 
+for epoch in range(nb_epochs):
+    running_loss = 0.0
+    for i, data in enumerate(trainloader, 0):
+        # get the inputs
+        inputs, labels = data
+        #print(inputs)
+        i1, i2, i3 = inputs[0,0], inputs[0,1], inputs[0,2]
+
+        i1, i2, i3, labels = Variable(torch.from_numpy(np.array([i1]))), Variable(torch.from_numpy(np.array([i2]))), Variable(torch.from_numpy(np.array([i3]))), Variable(labels)
+
+        # zero the parameter gradients
+        opt.zero_grad()
+
+        #print(i1, i2, i3)
+        # forward + backward + optimize
+        i1 = i1.cuda()
+        i2 = i2.cuda()
+        i3 = i3.cuda()
+        labels = labels.cuda()
+        outputs = m(i1, i2, i3)
+        #print(outputs, labels)
+        loss = F.nll_loss(outputs, labels)
+        loss.backward()
+        opt.step()
+
+        # print statistics
+
+        running_loss += loss.data[0]
+        if i % 2000 == 1999:    # print every 2000 mini-batches
+            print('[%d, %5d] loss: %.3f' %
+                    (epoch + 1, i + 1, running_loss / 2000.0))
+            running_loss = 0.0
+        #if i == 10:
+        #    break
+    #break
+print("Finished training")
