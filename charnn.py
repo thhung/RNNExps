@@ -35,8 +35,8 @@ class CustomDataset(utils.Dataset):
     """
 
     def __init__(self, data_path=None):
-        # TODO
-        # 1. Initialize file path or list of file names.
+      
+        # Initialize file path or list of file names.
         # place to save dataset
         data_path = 'data/nietzsche/'
 
